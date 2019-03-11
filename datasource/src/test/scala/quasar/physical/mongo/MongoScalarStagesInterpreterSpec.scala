@@ -65,6 +65,113 @@ class MongoScalarStagesInterpreterSpec
     }
   }
 
+//InterpretedRead(ResourcePath(/datasource/8a0604f2-5f3d-4ccc-97c7-ab36c049074b/test/nested.data))
+//╰─ ScalarStages(ExcludeId)
+//   ├─ Project(.topObj)
+//   ├─ Mask
+//   │  ╰─ Column[.](Object)
+//   ├─ Pivot(IncludeId, Object)
+//   ├─ Mask
+//   │  ├─ Column[[0]](⊤)
+//   │  ╰─ Column[[1]](⊤)
+//   ├─ Mask
+//   │  ├─ Column[[0]](⊤)
+//   │  ╰─ Column[[1]](Object)
+//   ├─ Wrap(cartesian)
+//
+  "foobar" >> {
+    import quasar.api.table.ColumnType
+    import quasar.common.CPathField
+
+    "testtest" >> {
+      val input = ldjson("""{"topObj": {"midArr":[[10, 11, 12], {"a": "j", "b": "k", "c": "l"}], "midObj": {"botArr":[13, 14, 15], "botObj": {"a": "m", "b": "n", "c": "o"}}}}""")
+      val stages = List(
+        Project(CPath.parse(".topObj")),
+        Mask(Map(CPath.Identity -> Set(ColumnType.Object))),
+        Pivot(IdStatus.IncludeId, ColumnType.Object),
+        Mask(Map(
+          CPath.parse("[0]") -> ColumnType.Top,
+          CPath.parse("[1]") -> ColumnType.Top)),
+        Mask(Map(
+          CPath.parse("[0]") -> ColumnType.Top,
+          CPath.parse("[1]") -> Set(ColumnType.Object))),
+        Wrap("cartesian"))
+
+      val expected = ldjson("""
+        { "cartesian": ["midArr"] }
+        { "cartesian": ["midObj", {"botArr":[13, 14, 15], "botObj": {"a": "m", "b": "n", "c": "o"}}] }
+      """)
+
+ //   ├─ Cartesian
+ //   │  ├─ Key(".cartouche0")
+ //   │  │  ╰─ tuple
+ //   │  │     ├─ String(".cartesian")
+ //   │  │     ╰─ List
+ //   │  │        ╰─ Project([0])
+ //   │  ╰─ Key(".cartouche1")
+ //   │     ╰─ tuple
+ //   │        ├─ String(".cartesian")
+ //   │        ╰─ List
+ //   │           ├─ Project([1])
+ //   │           ├─ Pivot(IncludeId, Object)
+ //   │           ╰─ Mask
+ //   │              ├─ Column[[0]](⊤)
+ //   │              ╰─ Column[[1]](⊤)
+
+      val expected2 = ldjson("""
+        { "cartouche0": "midArr" }
+        { "cartouche0": "midObj", "cartouche1": ["botArr", [13, 14, 15]] }
+        { "cartouche0": "midObj", "cartouche1": ["botObj", {"a": "m", "b": "n", "c": "o"}] }
+      """)
+
+      val expected3 = ldjson("""
+        { "cartouche0": "midArr" }
+        { "cartouche0": "midObj", "cartouche1": {"botArr":[13, 14, 15], "botObj": {"a": "m", "b": "n", "c": "o"}} }
+      """)
+
+      val expected4 = ldjson("""
+        { "x": ["foo"] }
+        { "x": ["bar", 42] }
+      """)
+
+      val expected5 = ldjson("""
+        { "x0": "foo" }
+        { "x0": "bar", "x1": 42 }
+      """)
+      val targets0 = Map(
+        (CPathField("cartouche0"), (CPathField("cartesian"), List(
+          Project(CPath.parse("[0]"))))),
+        (CPathField("cartouche1"), (CPathField("cartesian"), List(
+          Project(CPath.parse("[1]")),
+          Pivot(IdStatus.IncludeId, ColumnType.Object),
+          Mask(Map(
+            CPath.parse("[0]") -> ColumnType.Top,
+            CPath.parse("[1]") -> ColumnType.Top))))))
+
+      val targets1 = Map(
+        (CPathField("cartouche0"), (CPathField("cartesian"), List(
+          Project(CPath.parse("[0]"))))),
+        (CPathField("cartouche1"), (CPathField("cartesian"), List(
+          Project(CPath.parse("[1]")),
+          Pivot(IdStatus.IncludeId, ColumnType.Object)))))
+
+      val targets2 = Map(
+        (CPathField("cartouche0"), (CPathField("cartesian"), List(
+          Project(CPath.parse("[0]"))))),
+        (CPathField("cartouche1"), (CPathField("cartesian"), List(
+          Project(CPath.parse("[1]"))))))
+
+      val targets = Map(
+        (CPathField("x0"), (CPathField("x"), List(
+          Project(CPath.parse("[0]"))))),
+        (CPathField("x1"), (CPathField("x"), List(
+          Project(CPath.parse("[1]"))))))
+
+      //input must interpretInto(stages)(expected)
+      expected4 must cartesianInto(targets)(expected5)
+    }
+  }
+
   val RootKey: String = "rootKey"
 
   val RootProjection = Project(CPath.parse(".rootKey"))

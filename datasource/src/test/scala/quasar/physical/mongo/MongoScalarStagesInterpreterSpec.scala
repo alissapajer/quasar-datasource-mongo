@@ -65,23 +65,46 @@ class MongoScalarStagesInterpreterSpec
     }
   }
 
-//InterpretedRead(ResourcePath(/datasource/8a0604f2-5f3d-4ccc-97c7-ab36c049074b/test/nested.data))
-//╰─ ScalarStages(ExcludeId)
-//   ├─ Project(.topObj)
-//   ├─ Mask
-//   │  ╰─ Column[.](Object)
-//   ├─ Pivot(IncludeId, Object)
-//   ├─ Mask
-//   │  ├─ Column[[0]](⊤)
-//   │  ╰─ Column[[1]](⊤)
-//   ├─ Mask
-//   │  ├─ Column[[0]](⊤)
-//   │  ╰─ Column[[1]](Object)
-//   ├─ Wrap(cartesian)
-//
   "foobar" >> {
     import quasar.api.table.ColumnType
     import quasar.common.CPathField
+
+
+//(v93.1.61) 💪 $ select a, b[*], b[*:] as i from `flattenable.data`a
+//select a, b[*], b[*:]QScript (Optimized):
+//InterpretedRead(ResourcePath(/datasource/8a0604f2-5f3d-4ccc-97c7-ab36c049074b/test/flattenable.data))
+//╰─ ScalarStages(ExcludeId)
+//   ├─ Mask
+//   │  ├─ Column[.a](⊤)
+//   │  ╰─ Column[.b](Array)
+//   ├─ Cartesian
+//   │  ├─ Key(".cartouche0")
+//   │  │  ╰─ tuple
+//   │  │     ├─ String(".a")
+//   │  │     ╰─ List
+//   │  ╰─ Key(".cartouche1")
+//   │     ╰─ tuple
+//   │        ├─ String(".b")
+//   │        ╰─ List
+//   │           ├─ Pivot(IncludeId, Array)
+//   │           ╰─ Mask
+//   │              ├─ Column[[1]](⊤)
+//   │              ╰─ Column[[0]](⊤)
+//   ╰─ Cartesian
+//      ├─ Key(".a")
+//      │  ╰─ tuple
+//      │     ├─ String(".cartouche0")
+//      │     ╰─ List
+//      ├─ Key(".i")
+//      │  ╰─ tuple
+//      │     ├─ String(".cartouche1")
+//      │     ╰─ List
+//      │        ╰─ Project([0])
+//      ╰─ Key(".b")
+//         ╰─ tuple
+//            ├─ String(".cartouche1")
+//            ╰─ List
+//               ╰─ Project([1])
 
     "testtest" >> {
       val input = ldjson("""{"topObj": {"midArr":[[10, 11, 12], {"a": "j", "b": "k", "c": "l"}], "midObj": {"botArr":[13, 14, 15], "botObj": {"a": "m", "b": "n", "c": "o"}}}}""")
@@ -101,22 +124,6 @@ class MongoScalarStagesInterpreterSpec
         { "cartesian": ["midArr"] }
         { "cartesian": ["midObj", {"botArr":[13, 14, 15], "botObj": {"a": "m", "b": "n", "c": "o"}}] }
       """)
-
- //   ├─ Cartesian
- //   │  ├─ Key(".cartouche0")
- //   │  │  ╰─ tuple
- //   │  │     ├─ String(".cartesian")
- //   │  │     ╰─ List
- //   │  │        ╰─ Project([0])
- //   │  ╰─ Key(".cartouche1")
- //   │     ╰─ tuple
- //   │        ├─ String(".cartesian")
- //   │        ╰─ List
- //   │           ├─ Project([1])
- //   │           ├─ Pivot(IncludeId, Object)
- //   │           ╰─ Mask
- //   │              ├─ Column[[0]](⊤)
- //   │              ╰─ Column[[1]](⊤)
 
       val expected2 = ldjson("""
         { "cartouche0": "midArr" }
@@ -161,14 +168,45 @@ class MongoScalarStagesInterpreterSpec
         (CPathField("cartouche1"), (CPathField("cartesian"), List(
           Project(CPath.parse("[1]"))))))
 
+      val targetss = Map(
+        (CPathField("x0"), (CPathField("a"), Nil)),
+        (CPathField("x1"), (CPathField("b"), List(
+          Pivot(IdStatus.IncludeId, ColumnType.Array),
+          Mask(Map(
+            CPath.parse("[0]") -> ColumnType.Top,
+            CPath.parse("[1]") -> ColumnType.Top))))))
+
       val targets = Map(
-        (CPathField("x0"), (CPathField("x"), List(
-          Project(CPath.parse("[0]"))))),
-        (CPathField("x1"), (CPathField("x"), List(
-          Project(CPath.parse("[1]"))))))
+        (CPathField("x0"), (CPathField("a"), Nil)),
+        (CPathField("x1"), (CPathField("b"), List(
+          Pivot(IdStatus.IncludeId, ColumnType.Array)))))
+
+     val foo = ldjson("""
+      { "a": 1, "b": [true, true, true] }
+      { "a": 2, "b": [false, false] }
+      { "a": 3, "b": "string" }
+      { "a": 4, "b": null }
+      """)
+     val foo2 = ldjson("""
+      { "a": 1, "b": [true, true, true] }
+      { "a": 2, "b": [false, false] }
+      { "a": 3, "b": 42 }
+      { "a": 4 }
+      """)
+     val foo3 = ldjson("""
+      { "x0": 1, "x1": [0, true] }
+      { "x0": 1, "x1": [1, true] }
+      { "x0": 1, "x1": [2, true] }
+      { "x0": 2, "x1": [0, false] }
+      { "x0": 2, "x1": [1, false] }
+      { "x0": 3 }
+      { "x0": 4 }
+      """)
 
       //input must interpretInto(stages)(expected)
-      expected4 must cartesianInto(targets)(expected5)
+      foo2 must cartesianInto(targets)(foo3)
+      //foo1 must maskInto(".x" -> ColumnType.Top, ".y" -> ColumnType.Top)(foo1)
+      //foo1 must maskInto("." -> ColumnType.Top)(foo1)
     }
   }
 
